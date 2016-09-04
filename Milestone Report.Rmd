@@ -1,0 +1,230 @@
+---
+title: "Capstone Project Exploratory Data Analysis - Milestone Report"
+author: "Ewen McKinnon"
+date: "Sunday, September 04, 2016"
+output: html_document
+---
+# Summary
+A large sample of news articles, blogs and tweets have been downloaded. The objective is to explore the structure of the words within these documents in order to develop a word prediction application which can predict the next word that a user might type following a previous series of words. This short report presents exploratory data analysis  - an initial examination of the datasets in order to inform the design of the application.  
+```{r workspace, echo=FALSE,message=FALSE,warning=FALSE}
+setwd("C:/R Programming Course/Capstone Project/Project Files")
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(utils)
+library(RWeka)
+library(stringi)
+library(ggplot2)
+```
+
+```{r load_data, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+text_twitter <- readLines("en_US.twitter.txt")
+text_news <- readLines("en_US.news.txt")
+text_blogs <- readLines("en_US.blogs.txt")
+profane_words <- as.character(read.delim("bad-words.txt", header=FALSE, quote="", stringsAsFactors=FALSE))
+```
+
+```{r basic_analysis1, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+totallines_twitter <- length(text_twitter)
+totallines_news <- length(text_news)
+totallines_blogs <- length(text_blogs)
+size_twitter <- object.size(text_twitter)
+size_news <- object.size(text_news)
+size_blogs <- object.size(text_blogs)
+```
+
+```{r sampling, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+df_twitter <- data.frame(text = text_twitter)
+df_news <- data.frame(text = text_news)
+df_blogs <- data.frame(text = text_blogs)
+df_total <- rbind(df_twitter,df_news,df_blogs)
+set.seed(32456)
+sample <- data.frame(num = sample(1:10,nrow(df_total),replace=T))
+df_test <- data.frame(text = df_total[sample$num>7,])
+df_training <- data.frame(text = df_total[sample$num<=7,])
+```
+
+# High Level Data Description
+The data is from a corpus called HC Corpora (www.corpora.heliohost.org). Three files have been downloaded:  
+
+ - Tweets: A `r round(size_twitter/1000000,2)` MBytes file with `r prettyNum(totallines_twitter, big.mark=',', big.interval = 3L)` lines of text.
+ - News: A `r round(size_news/1000000,2)` MBytes file with `r prettyNum(totallines_news, big.mark=',', big.interval = 3L)` lines of text.
+ - Blogs: A `r round(size_blogs/1000000,2)` MBytes file with `r prettyNum(totallines_blogs, big.mark=',', big.interval = 3L)` lines of text.
+
+For the purposes of analysis I have appended the three files and then created two datasets - one for training the text prediction algorithms and one for later testing of prediction performance. The training dataset is a random sample of 70% of the lines from the three files, and the test dataset is the remaining 30% of the lines. The rest of this report focuses on the training dataset only.
+
+```{r text_cleansing, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+#Sample training set to reduce processing time
+perc_sample <- 1  #sample rate from 1% to 100%
+set.seed(42567)
+sample1 <- data.frame(num = sample(1:100,nrow(df_training),replace=T))
+df_training_sample <- data.frame(text = df_training[sample1$num<=perc_sample,])
+
+#Translate to corpus
+text_training <- DataframeSource(df_training_sample)
+docs_training <- Corpus(text_training)
+
+#Cleanse data
+text_training <- DataframeSource(df_training_sample)
+docs_training <- Corpus(text_training)
+docs_training <-tm_map(docs_training,removePunctuation)
+docs_training <-tm_map(docs_training,removeNumbers)
+docs_training <-tm_map(docs_training,tolower)
+docs_training <-tm_map(docs_training,stripWhitespace)
+docs_training <-tm_map(docs_training,removeWords,profane_words)
+
+removeSpecialChars <- function(x) gsub("[^a-zA-Z0-9 ]","",x) # remove all non-alphanumerics
+docs_training <- tm_map(docs_training, removeSpecialChars)
+
+#Convert cleansed data back to dataframe
+docs_training <- tm_map(docs_training, PlainTextDocument)
+df_docs_training <- data.frame(text=unlist(sapply(docs_training,`[`,"content")),stringsAsFactors=F)
+```
+
+
+# Exploratory Data Analysis
+
+## Data Preparation
+The training dataset is large with `r prettyNum(nrow(df_training), big.mark=',', big.interval = 3L)` lines of text. In order to reduce processing time for this exploratory analysis I have taken a random sample of `r perc_sample`% of the lines. On inspection of the data it is clear that there are some words and characters that need to be removed. I have therefore prepared the training set by:  
+
+- removing punctuation
+- removing numbers
+- converting all words into lower case
+- stripping whitespace
+- removing all remaining non-alpha-numeric characters
+
+In addition I have stripped out profanities using the standard list of words banned by Google which can be found at this link:
+http://www.freewebheaders.com/full-list-of-bad-words-banned-by-google/ 
+
+
+```{r text_analytics, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+#Create sorted unigram table of frequences
+one_grams <- NGramTokenizer(df_docs_training,Weka_control(min = 1, max = 1))
+one_grams_df <- data.frame(table(one_grams))
+one_grams_df <- one_grams_df[order(one_grams_df$Freq,decreasing=TRUE),]
+rownames(one_grams_df) <- c()
+
+#Create sorted bi-gram table of frequences
+two_grams <- NGramTokenizer(df_docs_training,Weka_control(min = 2, max = 2))
+two_grams_df <- data.frame(table(two_grams))
+two_grams_df <- two_grams_df[order(two_grams_df$Freq,decreasing=TRUE),]
+rownames(two_grams_df) <- c()
+
+#Create sorted tri-gram table of frequences
+three_grams <- NGramTokenizer(df_docs_training,Weka_control(min = 3, max = 3))
+three_grams_df <- data.frame(table(three_grams))
+three_grams_df <- three_grams_df[order(three_grams_df$Freq,decreasing=TRUE),]
+rownames(three_grams_df) <- c()
+
+```
+#Data Analysis
+## Distributions of Single Words (1-grams)
+Some words are more frequent than others in the sample of training data. Of the `r prettyNum(nrow(one_grams_df), big.mark=',', big.interval = 3L)` single words occurring in the sample of data, the top 10 most frequently occurring words are:   
+
+```{r single_words1, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+one_grams_df[1:10,]
+```
+
+```{r single_words3, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+one_gram_occurences<- data.frame(occurances = table(unlist(one_grams_df$Freq)))
+```
+We can look at the distribution of frequencies of words - see Plot 1. This shows that a large number of words (`r prettyNum(one_gram_occurences[1,2], big.mark=',', big.interval = 3L)`) occur only once across the corpus, `r prettyNum(one_gram_occurences[2,2], big.mark=',', big.interval = 3L)` words occur twice and so forth. By contrast, the most frequently occurring word in the data set occurs `r as.character(one_gram_occurences$occurances.Var1[nrow(one_gram_occurences)])` times. (Note the log scale on the y-axis of Plot 1).
+
+
+```{r single_words2, echo=FALSE,message=FALSE,warning=FALSE, fig.width=10,fig.height=6,cache=TRUE}
+buckets <- c(0,1,2,3,4,5,6,7,8,9,10,100,1000,30000)
+names <- c("1","2","3","4","5","6","7","8","9","10","11-100","1000","1000+")
+mydata_hist <- hist(one_grams_df$Freq, breaks=buckets, plot=FALSE)
+bp <- barplot(mydata_hist$count, log="y", col="blue", ylim = c(1,50000),names.arg=names,
+              main = "Plot 1: Histogram of Frequencies of Occurrences of Single Words",  
+              xlab = "Frequencies of Occurrence", ylab = "Number of Words")
+text(bp, mydata_hist$count, labels=mydata_hist$count, pos=3)
+```
+
+## Distribution of n-grams
+### 2-grams
+We can also look at combinations of two words - or '2-grams'. Some 2-grams are more frequent than others in the sample of training data. There are many more 2-grams combinations than 1-grams. Of the `r prettyNum(nrow(two_grams_df), big.mark=',', big.interval = 3L)` 2-grams occurring in the sample of data, the top 10 most frequently occurring 2-grams are:   
+
+```{r two_words1, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+two_grams_df[1:10,]
+```
+
+```{r two_words3, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+two_gram_occurences<- data.frame(occurances = table(unlist(two_grams_df$Freq)))
+```
+We can look at the distribution of frequencies of 2-grams - See plot 2. This shows that a much larger number of 2-grams (`r prettyNum(two_gram_occurences[1,2], big.mark=',', big.interval = 3L)`) occur only once across the corpus than 1-grams. `r prettyNum(two_gram_occurences[2,2], big.mark=',', big.interval = 3L)` 2-grams occur twice and so forth. The most frequently occurring 2-gram in the data set occurs `r as.character(two_gram_occurences$occurances.Var1[nrow(two_gram_occurences)])` times.
+
+```{r two_words2, echo=FALSE,message=FALSE,warning=FALSE, fig.width=10,fig.height=6,cache=TRUE}
+buckets <- c(0,1,2,3,4,5,6,7,8,9,10,100,1000,30000)
+names <- c("1","2","3","4","5","6","7","8","9","10","11-100","1000","1000+")
+mydata_hist <- hist(two_grams_df$Freq, breaks=buckets, plot=FALSE)
+bp <- barplot(mydata_hist$count, log="y", col="blue", ylim = c(1,400000),names.arg=names,
+              main = "Plot 2: Histogram of Frequencies of Occurrences of Two Word '2-grams'",  
+              xlab = "Frequencies of Occurrence", ylab = "Number of two word 2-grams")
+text(bp, mydata_hist$count, labels=mydata_hist$count, pos=3)
+```
+
+### 3-grams
+Finally we can look at combinations of three words - or '3-grams'. Some 3-grams are more frequent than others in the sample of training data. Again there are many more 3-grams combinations than 1-grams or 2-grams. Of the `r prettyNum(nrow(three_grams_df), big.mark=',', big.interval = 3L)` 3-grams occurring in the sample of data, the top 10 most frequently occurring 3-grams are:   
+
+```{r three_words1, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+three_grams_df[1:10,]
+```
+
+```{r three_words3, echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE}
+three_gram_occurences<- data.frame(occurances = table(unlist(three_grams_df$Freq)))
+```
+We can look at the distribution of frequencies of 3-grams - See plot 3. This shows that a much larger number of 3-grams (`r prettyNum(three_gram_occurences[1,2], big.mark=',', big.interval = 3L)`) occur only once across the corpus than 1-grams and 2-grams. `r prettyNum(three_gram_occurences[2,2], big.mark=',', big.interval = 3L)` 3-grams occur twice and so forth. The most frequently occurring 3-gram in the data set occurs `r as.character(three_gram_occurences$occurances.Var1[nrow(three_gram_occurences)])` times.
+
+```{r three_words2, echo=FALSE,message=FALSE,warning=FALSE, fig.width=10,fig.height=6,cache=TRUE}
+buckets <- c(0,1,2,3,4,5,6,7,8,9,10,100,1000)
+names <- c("1","2","3","4","5","6","7","8","9","10","11-100","1000")
+mydata_hist <- hist(three_grams_df$Freq, breaks=buckets, plot=FALSE)
+bp <- barplot(mydata_hist$count, log="y", col="blue", ylim = c(1,800000),names.arg=names,
+              main = "Plot 3: Histogram of Frequencies of Occurrences of Three Word '3-grams'",  
+              xlab = "Frequencies of Occurrence", ylab = "Number of two word 3-grams")
+text(bp, mydata_hist$count, labels=mydata_hist$count, pos=3)
+```
+
+### Conclusions from n-gram analysis
+It is clear that the distributions are significantly different when comparing the frequencies of occurrence of 1-grams, 2-grams and 3-grams. As the combination of words increases - they are less likely to be found in the data set more than once. However the number of combinations increases also and therefore the size of the word tables that will need to be stored on which to base the prediction algorithms. With a random sample of `r perc_sample`% of the lines of the training set the sizes of the three word tables produced are:
+
+ - 1-gram size is `r round(object.size(one_grams_df)/1000000,2)` MBytes
+ - 2-gram size is `r round(object.size(two_grams_df)/1000000,2)` MBytes 
+ - 3-gram size is `r round(object.size(three_grams_df)/1000000,2)` MBytes 
+
+Smart phones typically have GBytes of storage so storing 2 and 3-gram tables should be possible - and it might be possible to go beyond this to 4 and 5-grams however there are likely to be diminishing returns in terms of classification discrimination as the greater the length of the n-gram the more likely it will only occur once, like the majority of other n-grams of the same length, and therefore have equal probability.
+
+```{r coverage, echo=FALSE,message=FALSE,warning=FALSE,}
+#Work out the number of 1-grams where the sum of frequence is 50% of the total sum of frequencies
+moving_coverage <- 0
+totaloccurances <- sum(one_grams_df$Freq)
+for(i in 1:length(one_grams_df$Freq)) {
+  moving_coverage <- moving_coverage + one_grams_df$Freq[i]
+  if(moving_coverage >= 0.5*totaloccurances){break}
+}
+coverage_50 <- i
+
+#Work out the number of 1-grams where the sum of frequence is 90% of the total sum of frequencies
+moving_coverage <- 0
+for(i in 1:length(one_grams_df$Freq)) {
+  moving_coverage <- moving_coverage + one_grams_df$Freq[i]
+  if(moving_coverage >= 0.9*totaloccurances){break}
+}
+coverage_90 <- i
+```
+
+We can also calculate the total number of occurrences of 1-grams which will enable us to calculate relative probabilities of occurrence. The sum of frequencies of occurrences of all 1-grams in our sample of training data is `r prettyNum(totaloccurances, big.mark=',', big.interval = 3L)`. The number of high frequency words which can cover 50% of these occurrences is `r prettyNum(coverage_50, big.mark=',', big.interval = 3L)` and the number of highest frequency words to cover 90% of these occurrences is `r prettyNum(coverage_90, big.mark=',', big.interval = 3L)`. These are perhaps surprising results but also highlight how the datasets are dominated by a small set of high frequency words that are very common in the English Language.
+
+# Conclusions for Next Stage
+Based on the exploratory analysis for the next stage I plan to proceed as follows:
+
+ - develop and store the n-gram tables up to 5-grams
+ - analyse the last 4 words typed in by user and develop a prediction model based on a combination of 1-gram to 5-gram probabilities
+ - I will use the test data to test the performance of the classifier by taking random sets of 1, 2 and 3 words from a sample of lines of the test data set, predicting the next word and checking the result
+ 
+For efficiency I will explore Markov chains for storing transition probabilities from one state (1-word) to another (2-word) etc and determine whether object sizes and processing times are indeed smaller using this approach. For accuracy and increased coverage I will re-run the analysis on a much higher proportion of the training data. Processing times for developing the n-gram tables will not be experienced by the end user because the final application will work on the post-processed data tables - so I can afford to re-run my exploratory analysis over night on a larger sample and boost accuracy and coverage.
+
+#Analysis Code
+Note: the R-Markdown code for this report is published at https://github.com/ermckinnon/CapstoneProject.
+
